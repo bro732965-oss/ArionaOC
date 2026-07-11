@@ -63,6 +63,15 @@ main_menu:
 ; ============================================================
 ; ============================================================
 
+ap; ============================================================
+; APP 1: ARIONA SCRIPT ENGINE (С ЭКСПОРТОМ/ИМПОРТОМ)
+; ============================================================
+; Оригинальная логика Dov.asm + экспорт/импорт на дискету
+; 7 - EXPORT    (сохранить состояние в сектор 10)
+; 8 - IMPORT    (загрузить состояние из сектора 10)
+; @ - включает режим рисования (как в оригинале)
+; ============================================================
+
 app_dov:
     mov si, app_title
     call print_string
@@ -77,33 +86,45 @@ dov_loop:
     call print_string
 
     call get_key
+    mov [dov_core], al
 
-    cmp al, '1'
+    cmp byte [dov_core], '1'
     je dov_flag
-    cmp al, '2'
+
+    cmp byte [dov_core], '2'
     je dov_flag1
-    cmp al, '3'
+
+    cmp byte [dov_core], '3'
     je dov_cndt
-    cmp al, '4'
-    je dov_driver
-    cmp al, '5'
-    je dov_data_paint
-    cmp al, '6'
+
+    cmp byte [dov_core], '4'
+    je dov_cndt          ; В оригинале 3 и 4 ведут на cndt!
+
+    cmp byte [dov_core], '5'
+    je dov_port_data
+
+    cmp byte [dov_core], '6'
     je dov_flag2
-    cmp al, '7'
-    je dov_export_mpl
-    cmp al, '8'
-    je dov_import_mpl
-    cmp al, '@'
-    je dov_library
-    cmp al, '0'
+
+    cmp byte [dov_core], '7'
+    je dov_export        ; НОВОЕ: Экспорт!
+
+    cmp byte [dov_core], '8'
+    je dov_import_disk   ; НОВОЕ: Импорт!
+
+    cmp byte [dov_core], '@'
+    je dov_import
+
+    cmp byte [dov_core], '0'
     je dov_exit
 
     mov si, dov_unknown
     call print_string
     jmp dov_loop
 
-; ===== ПЕРЕМЕННЫЕ DOV (ПОЛНЫЙ НАБОР) =====
+; ============================================================
+; ПЕРЕМЕННЫЕ DOV
+; ============================================================
 dov_core        db 0
 dov_input       db '0'
 dov_print       db '0'
@@ -120,7 +141,9 @@ dov_eq          db '0'
 dov_map         db '1'
 dov_pixel       db '0'
 
-; ===== КОМАНДА 1: FLAG =====
+; ============================================================
+; КОМАНДА 1: FLAG
+; ============================================================
 dov_flag:
     mov si, msg_dov_flag
     call print_string
@@ -130,7 +153,9 @@ dov_flag:
     mov [dov_flags], al
     jmp dov_loop
 
-; ===== КОМАНДА 2: FLAG1 (print + flagdata) =====
+; ============================================================
+; КОМАНДА 2: FLAG1
+; ============================================================
 dov_flag1:
     mov si, msg_dov_flag1
     call print_string
@@ -147,7 +172,9 @@ dov_flag1:
     mov [dov_flagdata], al
     jmp dov_loop
 
-; ===== КОМАНДА 3: CONDITION =====
+; ============================================================
+; КОМАНДА 3: CNDT
+; ============================================================
 dov_cndt:
     mov si, msg_dov_cndt
     call print_string
@@ -164,102 +191,17 @@ dov_cndt:
     mov [dov_flagcnd], al
     jmp dov_loop
 
-; ===== КОМАНДА 4: DRIVER =====
-dov_driver:
-    mov si, msg_dov_driver
-    call print_string
-    call read_string
-    mov si, cmd_buffer
-    call str_to_num
-    mov [dov_color], al
-    jmp dov_loop
+; ============================================================
+; КОМАНДА 5: PORT_DATA
+; ============================================================
+dov_port_data:
+    cmp byte [dov_eq], '1'
+    je dov_data_paint
+    jmp dov_data
 
-; ===== КОМАНДА 5: DATA_PAINT (рисование с проверкой условий) =====
-dov_data_paint:
-    call dov_check_conditions
-    mov si, msg_dov_pixel
-    call print_string
-    call dov_draw_pixel
-    call wait_key
-    jmp dov_loop
-
-; ===== РИСОВАНИЕ ПИКСЕЛЯ =====
-dov_draw_pixel:
-    mov ax, 0xA000
-    mov es, ax
-
-    mov al, [dov_y]
-    sub al, '0'
-    mov ah, 0
-    mov bx, 320
-    mul bx
-    mov al, [dov_x]
-    sub al, '0'
-    add ax, [dov_y]
-    sub ax, '0'
-    mov di, ax
-
-    mov al, [dov_color]
-    sub al, '0'
-    stosb
-    ret
-
-; ===== ПРОВЕРКА УСЛОВИЙ (ПОЛНАЯ ЛОГИКА ИЗ Dov.asm) =====
-dov_check_conditions:
-    mov al, [dov_flags]
-    cmp al, '1'
-    je .flag1
-    cmp al, '2'
-    je .flag2
-    cmp al, '3'
-    je .flag3
-    cmp al, '4'
-    je .flag4
-    jmp .done
-
-.flag1:
-    mov al, [dov_flagdata]
-    cmp al, '1'
-    je .print1
-    jmp .done
-.print1:
-    mov si, msg_dov_print1
-    call print_string
-    jmp .done
-
-.flag2:
-    mov al, [dov_flagdata]
-    cmp al, '2'
-    je .print2
-    jmp .done
-.print2:
-    mov si, msg_dov_print2
-    call print_string
-    jmp .done
-
-.flag3:
-    mov al, [dov_flagdata]
-    cmp al, '3'
-    je .print3
-    jmp .done
-.print3:
-    mov si, msg_dov_print3
-    call print_string
-    jmp .done
-
-.flag4:
-    mov al, [dov_flagdata]
-    cmp al, '4'
-    je .print4
-    jmp .done
-.print4:
-    mov si, msg_dov_print4
-    call print_string
-
-.done:
-    ret
-
-; ===== КОМАНДА 6: FLAG2 =====
+; ============================================================
+; КОМАНДА 6: FLAG2
+; ============================================================
 dov_flag2:
     mov si, msg_dov_flag2
     call print_string
@@ -269,8 +211,141 @@ dov_flag2:
     mov [dov_print], al
     jmp dov_loop
 
-; ===== КОМАНДА 7: EXPORT MPL (РЕАЛЬНЫЙ ФАЙЛ НА ДИСКЕТЕ) =====
-dov_export_mpl:
+; ============================================================
+; PRINT
+; ============================================================
+dov_print_msg:
+    mov si, msg_dov_print_text
+    call print_string
+    jmp dov_data
+
+; ============================================================
+; INPUT
+; ============================================================
+dov_input_sub:
+    mov si, msg_dov_input_text
+    call print_string
+    call read_string
+    mov si, cmd_buffer
+    call str_to_num
+    mov [dov_input], al
+    jmp dov_data
+
+; ============================================================
+; FLAG3
+; ============================================================
+dov_flag3:
+    mov al, [dov_input]
+    mov bl, [dov_cndt1]
+    cmp al, bl
+    je dov_driver1
+    jmp dov_data
+
+; ============================================================
+; КОМАНДА 7: DRIVER (была)
+; ============================================================
+dov_driver:
+    mov si, msg_dov_driver
+    call print_string
+    call read_string
+    mov si, cmd_buffer
+    call str_to_num
+    mov [dov_color], al
+    jmp dov_loop
+
+; ============================================================
+; DRIVER1
+; ============================================================
+dov_driver1:
+    mov al, [dov_color]
+    jmp dov_data
+
+; ============================================================
+; DATA (ОСНОВНАЯ ЛОГИКА)
+; ============================================================
+dov_data:
+    cmp byte [dov_flags], '1'
+    je dov_input_sub
+
+    cmp byte [dov_flagdata], '1'
+    je dov_print_msg
+
+    cmp byte [dov_cndt1], '1'
+    je dov_flag3
+
+    cmp byte [dov_flags], '2'
+    je dov_input_sub
+
+    cmp byte [dov_flagdata], '2'
+    je dov_print_msg
+
+    cmp byte [dov_cndt1], '2'
+    je dov_flag3
+
+    cmp byte [dov_flags], '3'
+    je dov_input_sub
+
+    cmp byte [dov_flagdata], '3'
+    je dov_print_msg
+
+    cmp byte [dov_cndt1], '3'
+    je dov_flag3
+
+    cmp byte [dov_flags], '4'
+    je dov_input_sub
+
+    cmp byte [dov_flagdata], '4'
+    je dov_print_msg
+
+    cmp byte [dov_cndt1], '4'
+    je dov_flag3
+
+    jmp dov_loop
+
+; ============================================================
+; КОМАНДА @: IMPORT (ВКЛЮЧАЕТ РЕЖИМ РИСОВАНИЯ)
+; ============================================================
+dov_import:
+    mov byte [dov_eq], '1'
+    jmp dov_loop
+
+; ============================================================
+; DATA_PAINT (РИСОВАНИЕ ПИКСЕЛЯ)
+; ============================================================
+dov_data_paint:
+    mov ax, 0xA000
+    mov es, ax
+
+    ; Получаем Y
+    mov al, [dov_y]
+    sub al, '0'
+    mov ah, 0
+    mov bx, 320
+    mul bx
+    mov di, ax
+
+    ; Получаем X
+    mov al, [dov_x]
+    sub al, '0'
+    mov ah, 0
+    add di, ax
+
+    ; Цвет
+    mov al, [dov_map]
+    sub al, '0'
+
+    ; Рисуем пиксель
+    mov [es:di], al
+
+    mov si, msg_dov_pixel
+    call print_string
+    call wait_key
+    jmp dov_loop
+
+; ============================================================
+; НОВОЕ: КОМАНДА 7 - EXPORT (СОХРАНЕНИЕ НА ДИСКЕТУ)
+; ============================================================
+dov_export:
     mov si, msg_dov_export
     call print_string
 
@@ -291,15 +366,17 @@ dov_export_mpl:
     mov [mpl_buffer+6], al
     mov al, [dov_map]
     mov [mpl_buffer+7], al
+    mov al, [dov_eq]
+    mov [mpl_buffer+8], al
 
     ; Записываем на дискету (сектор 10)
-    mov ah, 0x03          ; Запись на диск
-    mov al, 1             ; 1 сектор
-    mov ch, 0             ; Дорожка 0
-    mov cl, 10            ; Сектор 10
-    mov dh, 0             ; Головка 0
-    mov dl, 0x00          ; Диск A:
-    mov bx, mpl_buffer    ; Данные
+    mov ah, 0x03
+    mov al, 1
+    mov ch, 0
+    mov cl, 10
+    mov dh, 0
+    mov dl, 0x00
+    mov bx, mpl_buffer
     int 0x13
     jc .error
 
@@ -314,19 +391,21 @@ dov_export_mpl:
     call wait_key
     jmp dov_loop
 
-; ===== КОМАНДА 8: IMPORT MPL (РЕАЛЬНЫЙ ФАЙЛ С ДИСКЕТЫ) =====
-dov_import_mpl:
+; ============================================================
+; НОВОЕ: КОМАНДА 8 - IMPORT_DISK (ЗАГРУЗКА С ДИСКЕТЫ)
+; ============================================================
+dov_import_disk:
     mov si, msg_dov_import
     call print_string
 
     ; Читаем с дискеты (сектор 10)
-    mov ah, 0x02          ; Чтение с диска
-    mov al, 1             ; 1 сектор
-    mov ch, 0             ; Дорожка 0
-    mov cl, 10            ; Сектор 10
-    mov dh, 0             ; Головка 0
-    mov dl, 0x00          ; Диск A:
-    mov bx, mpl_buffer    ; Данные
+    mov ah, 0x02
+    mov al, 1
+    mov ch, 0
+    mov cl, 10
+    mov dh, 0
+    mov dl, 0x00
+    mov bx, mpl_buffer
     int 0x13
     jc .error
 
@@ -347,11 +426,11 @@ dov_import_mpl:
     mov [dov_flagcnd], al
     mov al, [mpl_buffer+7]
     mov [dov_map], al
+    mov al, [mpl_buffer+8]
+    mov [dov_eq], al
 
     mov si, msg_dov_import_done
     call print_string
-
-    call dov_draw_pixel
     call wait_key
     jmp dov_loop
 
@@ -361,49 +440,56 @@ dov_import_mpl:
     call wait_key
     jmp dov_loop
 
-; ===== КОМАНДА @: LIBRARY (ПОЛНОЦЕННАЯ БИБЛИОТЕКА) =====
-dov_library:
-    mov si, msg_dov_library
-    call print_string
-
-    ; Рисуем линию
-    call dov_draw_line
-
-    ; Рисуем круг
-    call dov_draw_circle
-
-    call wait_key
-    jmp dov_loop
-
-; ===== РИСОВАНИЕ ЛИНИИ =====
-dov_draw_line:
-    pusha
-    mov cx, 10
-    mov di, 160
-.line_loop:
-    mov byte [es:di], 0x0F
-    add di, 1
-    loop .line_loop
-    popa
-    ret
-
-; ===== РИСОВАНИЕ КРУГА =====
-dov_draw_circle:
-    pusha
-    mov cx, 10
-    mov di, 6400
-.circle_loop:
-    mov byte [es:di], 0x0A
-    add di, 320
-    loop .circle_loop
-    popa
-    ret
-
-; ===== ВЫХОД =====
+; ============================================================
+; ВЫХОД
+; ============================================================
 dov_exit:
     mov ax, 0x0003
     int 0x10
     ret
+
+; ============================================================
+; ДАННЫЕ DOV
+; ============================================================
+dov_prompt      db 0x0D, 0x0A
+                db 'Ariona Script Engine v2.1', 0x0D, 0x0A
+                db '========================================', 0x0D, 0x0A
+                db ' 1 - FLAG      (set flag)', 0x0D, 0x0A
+                db ' 2 - FLAG1     (set print + flagdata)', 0x0D, 0x0A
+                db ' 3 - CNDT      (set conditions)', 0x0D, 0x0A
+                db ' 4 - CNDT      (same as 3)', 0x0D, 0x0A
+                db ' 5 - PORT_DATA (check eqa and paint)', 0x0D, 0x0A
+                db ' 6 - FLAG2     (set print)', 0x0D, 0x0A
+                db ' 7 - EXPORT    (save state to disk)', 0x0D, 0x0A
+                db ' 8 - IMPORT    (load state from disk)', 0x0D, 0x0A
+                db ' @ - IMPORT    (enable paint mode)', 0x0D, 0x0A
+                db ' 0 - EXIT', 0x0D, 0x0A
+                db '========================================', 0x0D, 0x0A
+                db 'CMD> ', 0
+
+dov_unknown     db 'Unknown command! Use 1-8, @, 0', 0x0D, 0x0A, 0
+
+msg_dov_flag    db 'Enter flag value: ', 0
+msg_dov_flag1   db 'Enter print value: ', 0
+msg_dov_flagdata db 'Enter flagdata value: ', 0
+msg_dov_cndt    db 'Enter cndt1 value: ', 0
+msg_dov_flagcnd db 'Enter flagcnd value: ', 0
+msg_dov_driver  db 'Enter color: ', 0
+msg_dov_flag2   db 'Enter print value: ', 0
+msg_dov_pixel   db 'Pixel drawn!', 0x0D, 0x0A, 0
+
+msg_dov_print_text db 'Print message!', 0x0D, 0x0A, 0
+msg_dov_input_text db 'Input received!', 0x0D, 0x0A, 0
+
+msg_dov_export  db 'Exporting state to disk... ', 0
+msg_dov_export_done db 'State saved to sector 10!', 0x0D, 0x0A, 0
+msg_dov_export_error db 'Error exporting to disk!', 0x0D, 0x0A, 0
+
+msg_dov_import  db 'Importing state from disk... ', 0
+msg_dov_import_done db 'State loaded from sector 10!', 0x0D, 0x0A, 0
+msg_dov_import_error db 'Error importing from disk!', 0x0D, 0x0A, 0
+
+mpl_buffer      times 16 db 0
 
 ; ============================================================
 ; ============================================================
