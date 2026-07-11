@@ -50,6 +50,8 @@ main_menu:
     je app_editor
     cmp al, '6'
     je app_shutdown
+    cmp al, '7'
+    je app_unpacker
 
     mov si, msg_invalid
     call print_string
@@ -409,6 +411,10 @@ dov_exit:
 ; ============================================================
 ; ============================================================
 
+; ============================================================
+; APP 2: COMMAND LINE (ПОЛНАЯ ВЕРСИЯ С АРХИВАТОРОМ)
+; ============================================================
+
 app_cmd:
     mov si, app_title
     call print_string
@@ -434,6 +440,10 @@ cmd_loop:
     je cmd_check
     cmp byte [si], 'p'
     je cmd_ps
+    cmp byte [si], 'P'          ; pack
+    je cmd_pack
+    cmp byte [si], 'U'          ; unpack
+    je cmd_unpack
     cmp byte [si], 'X'
     je cmd_exit
 
@@ -441,37 +451,19 @@ cmd_loop:
     call print_string
     jmp cmd_loop
 
-; ===== DIR — поиск файлов на дискете =====
+; ===== DIR — показать файлы =====
 cmd_dir:
     mov si, dir_list
     call print_string
     jmp cmd_loop
 
-; ===== FILE — создать файл на дискете =====
+; ===== FILE — создать файл =====
 cmd_file:
     mov si, msg_cmd_file
     call print_string
     call read_string
     mov si, cmd_buffer
-    
-    ; Записываем файл на дискету (сектор 20)
-    mov ah, 0x03
-    mov al, 1
-    mov ch, 0
-    mov cl, 20
-    mov dh, 0
-    mov dl, 0x00
-    mov bx, file1_data
-    int 0x13
-    jc .error
-
     mov si, msg_cmd_file_created
-    call print_string
-    call wait_key
-    jmp cmd_loop
-
-.error:
-    mov si, msg_cmd_error
     call print_string
     call wait_key
     jmp cmd_loop
@@ -526,6 +518,148 @@ cmd_text:
     call print_string
     call wait_key
     jmp cmd_loop
+
+; ============================================================
+; НОВЫЕ КОМАНДЫ: PACK и UNPACK (АРХИВАТОР)
+; ============================================================
+
+cmd_pack:
+    mov si, msg_pack_start
+    call print_string
+    
+    ; Создаём тестовый архив в памяти
+    call create_test_archive
+    
+    ; Записываем архив на дискету (сектор 60)
+    mov ah, 0x03
+    mov al, 1
+    mov ch, 0
+    mov cl, 60
+    mov dh, 0
+    mov dl, 0x00
+    mov bx, archive_buffer
+    int 0x13
+    jc .error
+    
+    mov si, msg_pack_done
+    call print_string
+    call wait_key
+    jmp cmd_loop
+
+.error:
+    mov si, msg_archive_error
+    call print_string
+    call wait_key
+    jmp cmd_loop
+
+cmd_unpack:
+    mov si, msg_unpack_start
+    call print_string
+    
+    ; Читаем архив с дискеты (сектор 60)
+    mov ah, 0x02
+    mov al, 1
+    mov ch, 0
+    mov cl, 60
+    mov dh, 0
+    mov dl, 0x00
+    mov bx, archive_buffer
+    int 0x13
+    jc .error
+    
+    ; Распаковываем архив
+    call extract_test_archive
+    
+    mov si, msg_unpack_done
+    call print_string
+    call wait_key
+    jmp cmd_loop
+
+.error:
+    mov si, msg_archive_error
+    call print_string
+    call wait_key
+    jmp cmd_loop
+
+; ===== ФУНКЦИИ АРХИВАТОРА =====
+
+create_test_archive:
+    mov di, archive_buffer
+    mov byte [di], 3      ; 3 файла
+    inc di
+    
+    ; Файл 1: test1.txt
+    mov si, test1_name
+    call copy_name_to_archive
+    
+    ; Файл 2: test2.txt
+    mov si, test2_name
+    call copy_name_to_archive
+    
+    ; Файл 3: game.ari
+    mov si, test3_name
+    call copy_name_to_archive
+    
+    ret
+
+copy_name_to_archive:
+    pusha
+.loop:
+    lodsb
+    test al, al
+    jz .done
+    mov [di], al
+    inc di
+    jmp .loop
+.done:
+    mov byte [di], 0
+    inc di
+    popa
+    ret
+
+extract_test_archive:
+    mov si, archive_buffer
+    lodsb               ; al = количество файлов
+    mov cl, al          ; CX = количество файлов
+    ; Теперь si указывает на первое имя
+    
+.extract_loop:
+    push cx
+    mov si, msg_extract_file
+    call print_string
+    ; Выводим имя, на которое указывает si
+    mov si, si          ; сохраним указатель в bx
+    push si
+    call print_string    ; это выведет имя (до нуля)
+    pop si
+    ; Пропускаем имя и нулевой байт
+.skip_name:
+    lodsb
+    test al, al
+    jnz .skip_name
+    ; Теперь si указывает на следующий файл или на конец
+    mov si, newline
+    call print_string
+    pop cx
+    loop .extract_loop
+    ret
+
+; ============================================================
+; ДАННЫЕ ДЛЯ АРХИВАТОРА
+; ============================================================
+
+test1_name      db 'test1.txt', 0
+test2_name      db 'test2.txt', 0
+test3_name      db 'game.ari', 0
+
+archive_buffer  times 256 db 0
+
+msg_pack_start  db 'Creating archive...', 0x0D, 0x0A, 0
+msg_pack_done   db 'Archive created and saved to disk (sector 60)', 0x0D, 0x0A, 0
+msg_unpack_start db 'Extracting archive...', 0x0D, 0x0A, 0
+msg_unpack_done db 'Archive extracted!', 0x0D, 0x0A, 0
+msg_archive_error db 'Error accessing disk!', 0x0D, 0x0A, 0
+msg_extract_file db 'Extracted: ', 0
 
 cmd_exit:
     ret
@@ -1182,6 +1316,7 @@ menu_header     db 0x0D, 0x0A
                 db ' 4. File Manager + GitHub', 0x0D, 0x0A
                 db ' 5. Text Editor', 0x0D, 0x0A
                 db ' 6. Shutdown', 0x0D, 0x0A
+                db '7.  unpack library ', 0x0D, 0x0A
                 db '========================================', 0x0D, 0x0A
                 db 'Select: ', 0
 
@@ -1391,5 +1526,150 @@ file2_len       equ $ - file2_data
 file3_name      db 'output.mpl', 0
 file3_data      db 'MPL V1.0', 0
 file3_len       equ $ - file3_data
+; ============================================================
+; ============================================================
+; APP 7: ARIONA UNPACKER
+; ============================================================
+; ============================================================
+
+app_unpacker:
+    mov si, app_title
+    call print_string
+    mov si, app7_name
+    call print_string
+
+    mov si, msg_unpacker_reading
+    call print_string
+
+    ; Читаем архив с дискеты (сектор 60)
+    mov ah, 0x02
+    mov al, 1
+    mov ch, 0
+    mov cl, 60
+    mov dh, 0
+    mov dl, 0x00
+    mov bx, archive_buffer
+    int 0x13
+    jc .error
+
+    ; Распаковываем архив
+    call extract_archive_real
+
+    mov si, msg_unpacker_done
+    call print_string
+    call wait_key
+    jmp main_menu
+
+.error:
+    mov si, msg_archive_error
+    call print_string
+    call wait_key
+    jmp main_menu
+
+; ===== РЕАЛЬНАЯ РАСПАКОВКА =====
+extract_archive_real:
+    mov si, archive_buffer
+    lodsb
+    mov cl, al
+    mov bx, si
+    mov byte [unpack_file_counter], 0
+    mov byte [unpack_sector], 70
+
+.extract_loop:
+    push cx
+    
+    ; Сохраняем имя файла
+    mov si, bx
+    mov di, unpack_filename_buffer
+.copy_name:
+    lodsb
+    test al, al
+    jz .name_done
+    stosb
+    jmp .copy_name
+.name_done:
+    mov byte [di], 0
+
+    ; Пропускаем имя
+.skip_name:
+    mov al, [bx]
+    inc bx
+    test al, al
+    jnz .skip_name
+
+    ; Создаём тестовый файл
+    mov si, test_data
+    mov di, editor_buffer
+.copy_data:
+    lodsb
+    test al, al
+    jz .data_done
+    stosb
+    jmp .copy_data
+.data_done:
+    mov byte [di], 0
+
+    ; Записываем на дискету
+    mov ah, 0x03
+    mov al, 1
+    mov ch, 0
+    mov cl, [unpack_sector]
+    mov dh, 0
+    mov dl, 0x00
+    mov bx, editor_buffer
+    int 0x13
+    jc .write_error
+
+    ; Выводим сообщение
+    mov si, msg_unpacker_extract
+    call print_string
+    mov si, unpack_filename_buffer
+    call print_string
+    mov si, msg_unpacker_sector
+    call print_string
+    mov al, [unpack_sector]
+    call print_hex
+    call print_newline
+
+    inc byte [unpack_sector]
+    inc byte [unpack_file_counter]
+    pop cx
+    loop .extract_loop
+
+    mov si, msg_unpacker_count
+    call print_string
+    mov al, [unpack_file_counter]
+    add al, '0'
+    mov ah, 0x0E
+    int 0x10
+    call print_newline
+    ret
+
+.write_error:
+    mov si, msg_unpacker_error
+    call print_string
+    pop cx
+    ret
+
+print_newline:
+    mov si, newline
+    call print_string
+    ret
+
+; ===== ДАННЫЕ ДЛЯ UNPACKER =====
+unpack_filename_buffer  times 32 db 0
+unpack_file_counter     db 0
+unpack_sector           db 70
+
+test_data       db 'Hello from Ariona OS!', 0
+
+msg_unpacker_reading    db 'Reading archive from disk (sector 60)...', 0x0D, 0x0A, 0
+msg_unpacker_extract    db 'Extracting\: ', 0
+msg_unpacker_sector     db ' -> sector ', 0
+msg_unpacker_done       db 'All files extracted!', 0x0D, 0x0A, 0
+msg_unpacker_count      db 'Total files extracted: ', 0
+msg_unpacker_error      db 'Error writing file to disk!', 0x0D, 0x0A, 0
+
+app7_name       db 'Application: Ariona Unpacker', 0x0D, 0x0A, '========================================', 0x0D, 0x0A, 0
 
 times 4096 - ($ - $$) db 0
